@@ -4,7 +4,7 @@
 
 ## Setting up environment
 
-- You will require a GCP project to proccess the request - full documentation on setting up a GCP project at PwC can be found [here](https://cloud.google.com/resource-manager/docs/creating-managing-projects).
+- You will require a GCP project to proccess the request - full documentation on setting up a GCP project can be found [here](https://cloud.google.com/resource-manager/docs/creating-managing-projects).
 - Once your GCP project is set up, you should ensure that your local machine has the proper authentications to call the API - an explaination of set this up is given [here](https://cloud.google.com/docs/authentication/production).
 - Finally you will need to installed the scripts dependecies [Pandas (1.2.3); OpenPyXL (3.0.7); Google Cloud (2.0.0)] to ensure it can execute. This can be installed as follows: 
 ``` pip install --upgrade google-cloud-language numpy pandas openpyxl```.
