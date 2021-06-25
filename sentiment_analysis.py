@@ -4,25 +4,26 @@
 # Sentiment Analysis using GCP Natural Language API
 # Author: Jack Munday
 #
-# This script processes the output of a google survey excel file, taking it from a "wide" format with a col per question
-# to "long" format with a col for question id and another col for response. The free text responses are then given a
-# sentiment score through making calls to Google's Natural Language API. This script can then either be run inside the
-# google console or on your local machine provided you have granted the proper service accounts / keys to the project.
-#
 # Library dependencies: pandas (1.2.3), openpyxl (3.0.7), numpy (1.20.1), google cloud (2.0.0)
-#
 
 import pandas as pd
 from google.cloud import language_v1
+import os
+import json
 
 
-def pivot_data(input_data):
+def pivot_data(input_data, filetype, unique_id, slicer_columns, columns_to_drop):
     """
-    Takes an input excel file, filters for free text questions and then pivots from a "wide" to "long" dataframe
+    Takes an input survey file, filters for free text questions and then pivots from a "wide" to "long" dataframe
 
     params:
     ------------------------------------------------------------------------------------------------------------
-    input_data: xlsx survey data to be analysed e.g. google form output
+    input_data:         directory survey data to be analysed e.g. google form output
+    filetype:           file type of the survey data specified by input_data dir
+    unique_id:          name of unique identifier columns, if not present assigns row number to this value
+    slicer_columns:     these are the columns which you will want to use as your slicer values in power bi to
+                        filter the data
+    columns_to_drop:    columns in the data which do not contain free text responses, e.g. numerical
 
     returns:
     ------------------------------------------------------------------------------------------------------------
@@ -31,31 +32,33 @@ def pivot_data(input_data):
                     Question, type string: Question being answered or unique identifier to this question
                     Response, type string: Individual's response to the question
     """
+    if filetype == "xlsx":
+        df = pd.read_excel(input_data)
+    elif filetype == "csv":
+        df = pd.read_csv(input_data)
+    else:
+        print("Unsupported input file entered")
+        return 0
 
-    df = pd.read_excel(input_data)
-    #cols_to_drop = ['']
-    #df.drop(cols_to_drop, axis=1, inplace=True)
+    if columns_to_drop:
+        df.drop(columns_to_drop, axis=1, inplace=True)
 
-    # if your dataset doesn't have a unique user ID, then please uncomment the two lines below to generate an ID
-    # (this uses row number to keep track of unique response). In the case of a google form survey output the excel file
-    # has one line per respondent so using row numbers works fine. If you have multiple rows in your dataset per
-    # response this will not be an appropriate uID. This may be useful if you have the emails of respondents
-    # and would like to anonymise the dataset yet still keep track of the responses of a given individual
+    # generate a unique row id if dataset does not have a unique specifier already
+    if unique_id == "None":
+        df["unique id"] = [i for i in range(0, df.shape[0])]
+        df = df[["unique id"] + [col for col in df.columns if col != "unique id"]]
+    else:
+        df.rename(columns={unique_id: "unique id"}, inplace=True)
 
-    # df['uID'] = [i for i in range(df.shape[0])]
-    # df = df[['uID'] + [col for col in df.columns if col != 'uID']]
+    key_cols = ["unique id", *slicer_columns]
 
-    # columns that are not to be pivoted in the df, these are cols that you would like to keep track of for all rows in
-    # the dataset. You may for example have have a col for "Team" or "Grade" in here, these would be good to include in
-    # "key_cols" so that the data is filterable by these fields when being visualised.
-    key_cols = ['uID']
     # subtracts key_cols from all cols in df to get the columns which need to be pivoted
     pivot_cols = [x for x in list(df) if x not in key_cols]
 
     df = df.melt(id_vars=key_cols, value_vars=pivot_cols, var_name='Question', value_name='Response')
     df.dropna(subset=['Response'], inplace=True)
-    df = df.head(10)
-    df.to_csv('preprocess_data/pivoted_data.csv', index=False)
+    df = df.head(1)
+    df.to_csv('output_data/pivoted_data.csv', index=False)
     return df
 
 
@@ -64,8 +67,8 @@ def sentiment_analysis_response(text_content):
     Analyses the global sentiment of a single input string, returning it's sentiment and sentiment magnitude.
 
     This makes a call to Google's Natural Language API (https://cloud.google.com/natural-language).
-    It will require setting up a GCP project to process this request and  ensuring that proper authentication has 
-    been granted to the local machine running this script through setting up a service account
+    It will require setting up a GCP project to process this request (https://cloudrequests.pwc.com/), ensuring that
+    proper authentication has been granted to the local machine running this script through setting up a service account
     and generating the required keys inside of the project through which this request is being processed.
 
     params:
@@ -96,8 +99,8 @@ def sentiment_analysis_entity(text_content):
     relation to wider context for each proper noun (named entity).
 
     This makes a call to Google's Natural Language API (https://cloud.google.com/natural-language).
-    It will require setting up a GCP project to process this request and  ensuring that proper authentication has 
-    been granted to the local machine running this script through setting up a service account
+    It will require setting up a GCP project to process this request (https://cloudrequests.pwc.com/), ensuring that
+    proper authentication has been granted to the local machine running this script through setting up a service account
     and generating the required keys inside of the project through which this request is being processed.
 
     params:
@@ -108,8 +111,8 @@ def sentiment_analysis_entity(text_content):
     ------------------------------------------------------------------------------------------------------------
     entities:           type str - list of named entities (proper nouns) detected in response
     entity_type:        type str - list of classifications of entity type (e.g. Person, Organisation etc)
-    entity_salience:    type float - list of saliences (importance of noun in sentence) of named entities
-    entity_sentiment:   type float - list of the sentiment of named entities in entitiesin the range of [-1,1] as in
+    entity_salience:    type float - list of saliencies (importance of noun in sentence) of named entities
+    entity_sentiment:   type float - list of the sentiment of named entities in entities in the range of [-1,1] as in
                                     sentiment_analysis_response
     entity_magnitude:   type float, list of the magnitude of sentiment of named entities in entities as in
                                     sentiment_analysis_response
@@ -135,7 +138,7 @@ def sentiment_analysis_entity(text_content):
     return [entities, entity_type, entity_salience, entity_sentiment, entity_magnitude]
 
 
-def sentiment_pipeline(df, overall, entity):
+def sentiment_pipeline(df, overall, entity, slicer_columns, num_sentiment_cats):
     """
     Pipeline:
     1. Preprocessing dataset pivoting into a "long" format through calling pivot_data().
@@ -164,8 +167,15 @@ def sentiment_pipeline(df, overall, entity):
     # PREPROCESSING OF INPUT DATA
     ######################################################################
     # Partitions to map sentiment.score against a categorical value
-    cut_bins = [-1, -0.6, -0.2, 0.2, 0.6, 1]
-    cut_labels = ["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
+    if num_sentiment_cats == 5:
+        cut_bins = [-1, -0.6, -0.2, 0.2, 0.6, 1]
+        cut_labels = ["Very Negative", "Negative", "Neutral", "Positive", "Very Positive"]
+    elif num_sentiment_cats == 3:
+        cut_bins = [-1, -0.25, 0.25, 1]
+        cut_labels = ["Negative", "Neutral", "Positive"]
+    else:
+        print("Please enter either 3 or 5 in 'num_sentiment_cats in input_params.json")
+        return
 
     ######################################################################
     # SENTIMENT ANALYSIS OF EACH RESPONSE
@@ -173,21 +183,37 @@ def sentiment_pipeline(df, overall, entity):
     if overall:
         response_df = pd.DataFrame()
         for response in df['Response']:
-            # get row number of current response in df being proccessed
+            # get row number of current response in df being processed
             indx = df[df['Response'] == response].index[0]
-            current_id = df.loc[indx, 'uID']
+            current_id = df.loc[indx, 'unique id']
             current_question = df.loc[indx, 'Question']
-            response_sentiment, response_magnitude = sentiment_analysis_response(response)
-            response_df_loop = pd.DataFrame({'uID': current_id,
-                                   'Question': current_question,
-                                   'Response': response,
-                                   'Sentiment': response_sentiment,
-                                   'Magnitude': response_magnitude
-            }, index=[0])
+
+            if slicer_columns:
+                # slicer_columns and slicer_column_values dynamically account for the fact that the user may
+                # want to include extra columns that are not text responses to allow for filtering in visuals
+
+                slicer_column_values = [df.loc[indx, str(column)] for column in slicer_columns]
+                response_sentiment, response_magnitude = sentiment_analysis_response(response)
+
+                response_df_columns = ['unique id', *slicer_columns, 'Question', 'Response', 'Sentiment', 'Magnitude']
+                response_df_values = [current_id, *slicer_column_values, current_question, response, response_sentiment,
+                                      response_magnitude]
+
+                response_df_loop = pd.DataFrame([response_df_values], columns=response_df_columns, index=[0])
+            else:
+                response_sentiment, response_magnitude = sentiment_analysis_response(response)
+                response_df_loop = pd.DataFrame({'unique id': current_id,
+                                                 'Question': current_question,
+                                                 'Response': response,
+                                                 'Sentiment': response_sentiment,
+                                                 'Magnitude': response_magnitude
+                                                 }, index=[0])
+
             response_df = response_df.append(response_df_loop, ignore_index=True)
         response_df['Sentiment Buckets'] = pd.cut(response_df['Sentiment'], bins=cut_bins, labels=cut_labels)
 
-        response_df.to_csv('output_data/sentiment_by_response_TEST.csv', index=False)
+        response_df.to_csv('output_data/sentiment_by_response.csv', index=False)
+        print(response_df.head())
 
     ######################################################################
     # SENTIMENT ANALYSIS OF NAMED ENTITIES (PROPER NOUNS)
@@ -195,39 +221,38 @@ def sentiment_pipeline(df, overall, entity):
     if entity:
         entity_df = pd.DataFrame()
         for response in df['Response']:
-            # get row number of current response in df being proccessed, which allows referenced to "uID" and "Question"
+            # get row number of current response in df being processed, which allows referenced to "uID" and "Question"
             # via indx so that when the outputs from API call are appended into "entity_df" we have kept track of its
             # inputs.
             indx = df[df['Response'] == response].index[0]
-            current_id = df.loc[indx, 'uID']
+            current_id = df.loc[indx, 'unique id']
             current_question = df.loc[indx, 'Question']
             ##################################################################
             # MODIFY HERE IF YOU HAVE ADDED EXTRA VALUES TO KEY_COLS
-            # Suppose you had added 'Grade' to key_cols: key_cols = ['uID', 'Grade']
-            # uncomment the below and edit entity_df_loop accordinly
+            # Suppose you had added 'Grade' to key_cols: key_cols = ['Survey Instance ID', 'Grade']
+            # uncomment the below and edit entity_df_loop accordingly
             # current_grade = df.loc[indx, 'Question']
             #################################################################
-
+            # TODO MODIFY ENTITY SENTIMENT TO ACCOUNT FOR VARYING LENGTH OF SLICER_COLUMNS
             entity_list, type_list, salience_list, sentiment_list, magnitude_list = sentiment_analysis_entity(response)
 
             # loop over all entities detected in response, as sentiment_analysis_entity returns a series of list with
             # one index per entity in response
             for i in range(len(entity_list)):
                 #############################################################################
-                # APPEND ALL VALUES FROM 'key_cols' AND THEIR RESPECTIVE SENTIMENT METIRCS TO DF
-                # Suppose had added Grade to "key_cols": key_cols = ['uID', 'Grade']
-                # Then you would need to uncomment the following line into entity_df_loop:
+                # APPEND ALL VALUES FROM 'key_cols' AND THEIR RESPECTIVE SENTIMENT METRICS TO DF
+                # Suppose had added Grade to "key_cols": key_cols = ['Survey Instance ID', 'Grade']
+                # Then you would need to insert the following line into entity_df_loop:
                 # 'Grade': current_grade,
                 #############################################################################
-                entity_df_loop = pd.DataFrame({'uID': current_id,
+                entity_df_loop = pd.DataFrame({'unique id': current_id,
                                                'Question': current_question,
                                                'Response': response,
                                                'Entity': entity_list[i],
                                                'Type': type_list[i],
                                                'Salience': salience_list[i],
                                                'Sentiment': sentiment_list[i],
-                                               'Magnitude': magnitude_list[i]
-                }, index=[0])
+                                               'Magnitude': magnitude_list[i]}, index=[0])
                 entity_df = entity_df.append(entity_df_loop, ignore_index=True)
         entity_df['Sentiment Buckets'] = pd.cut(entity_df['Sentiment'], bins=cut_bins, labels=cut_labels)
 
@@ -235,5 +260,28 @@ def sentiment_pipeline(df, overall, entity):
     return
 
 
+def main():
+    """
+
+    """
+
+    with open('input_data/input_params.json') as f:
+        params = json.load(f)
+
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = params['api_key_directory']
+
+    filetype = params['file_directory'].partition(".")[2]
+
+    # TODO Fix if possible, as lightly forcing it here using (0/1), as couldn't read in the booleans from json properly
+    overall, entity = bool(int(params['overall'])), bool(int(params['entity']))
+
+    pivoted_df = pivot_data(params['file_directory'], filetype=filetype, unique_id=params['uID_column'],
+                            slicer_columns=params['slicer_columns'], columns_to_drop=params['columns_to_drop'])
+
+    sentiment_pipeline(pivoted_df, overall=overall, entity=entity, slicer_columns=params['slicer_columns'],
+                       num_sentiment_cats=params['num_sentiment_cats'])
+
+
+# TODO ADJUST COMMENTS FOR WHOLE SCRIPT ACCORDINGLY
 if __name__ == "__main__":
-    sentiment_pipeline(pivot_data("input_data/input_filename.xlsx"), overall=True, entity=True)
+    main()
