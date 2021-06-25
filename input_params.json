@@ -1,0 +1,10 @@
+{
+  "file_directory": "input_data/input_data-YM.xlsx",
+  "uID_column": "Survey Instance ID",
+  "slicer_columns": [],
+  "columns_to_drop": ["Survey Status"],
+  "api_key_directory": "api_key.json",
+  "overall": "1",
+  "entity": "0",
+  "num_sentiment_cats": "5"
+}
