@@ -57,6 +57,7 @@ def pivot_data(input_data, filetype, unique_id, slicer_columns, columns_to_drop)
 
     df = df.melt(id_vars=key_cols, value_vars=pivot_cols, var_name='Question', value_name='Response')
     df.dropna(subset=['Response'], inplace=True)
+    # limit dataset to one row for test to limit calls to gcp
     df = df.head(1)
     df.to_csv('output_data/pivoted_data.csv', index=False)
     return df
@@ -67,7 +68,7 @@ def sentiment_analysis_response(text_content):
     Analyses the global sentiment of a single input string, returning it's sentiment and sentiment magnitude.
 
     This makes a call to Google's Natural Language API (https://cloud.google.com/natural-language).
-    It will require setting up a GCP project to process this request (https://cloudrequests.pwc.com/), ensuring that
+    It will require setting up a GCP project to process this request, ensuring that
     proper authentication has been granted to the local machine running this script through setting up a service account
     and generating the required keys inside of the project through which this request is being processed.
 
@@ -99,7 +100,7 @@ def sentiment_analysis_entity(text_content):
     relation to wider context for each proper noun (named entity).
 
     This makes a call to Google's Natural Language API (https://cloud.google.com/natural-language).
-    It will require setting up a GCP project to process this request (https://cloudrequests.pwc.com/), ensuring that
+    It will require setting up a GCP project to process this request, ensuring that
     proper authentication has been granted to the local machine running this script through setting up a service account
     and generating the required keys inside of the project through which this request is being processed.
 
@@ -261,10 +262,10 @@ def sentiment_pipeline(df, overall, entity, slicer_columns, num_sentiment_cats):
 
 
 def main():
-    """
 
-    """
-
+    #############################################################################
+    # LOAD INPUT PARAMS CONFIG FILE
+    #############################################################################
     with open('input_data/input_params.json') as f:
         params = json.load(f)
 
@@ -272,14 +273,19 @@ def main():
 
     filetype = params['file_directory'].partition(".")[2]
 
-    # TODO Fix if possible, as lightly forcing it here using (0/1), as couldn't read in the booleans from json properly
+    # TODO Fix if possible, as slightly forcing it here using (0/1) - couldn't read in the booleans from json properly
     overall, entity = bool(int(params['overall'])), bool(int(params['entity']))
 
+    
+    #############################################################################
+    # RUN SENTIMENT PIPELINE
+    #############################################################################
     pivoted_df = pivot_data(params['file_directory'], filetype=filetype, unique_id=params['uID_column'],
                             slicer_columns=params['slicer_columns'], columns_to_drop=params['columns_to_drop'])
 
     sentiment_pipeline(pivoted_df, overall=overall, entity=entity, slicer_columns=params['slicer_columns'],
                        num_sentiment_cats=params['num_sentiment_cats'])
+    return
 
 
 # TODO ADJUST COMMENTS FOR WHOLE SCRIPT ACCORDINGLY
